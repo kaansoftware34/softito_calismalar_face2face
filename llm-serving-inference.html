@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Serving & Inference — Kubernetes'te Model Deployment</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@300;400;500;600&family=Syne:wght@700;800&display=swap');
+
+  :root {
+    --bg:        #0a0e14;
+    --surface:   #111722;
+    --border:    #1e2a3a;
+    --dim:       #2a3a50;
+
+    --text:      #d4e4f4;
+    --muted:     #5e7a96;
+    --label:     #3d5570;
+
+    --kserve:    #00c9a7;
+    --triton:    #4f8ef7;
+    --vllm:      #ff6b35;
+    --ollama:    #c77dff;
+
+    --accent:    #00c9a7;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'Inter', sans-serif;
+    --display:   'Syne', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ── GRID SCAN LINES (signature) ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0,201,167,.03) 39px, rgba(0,201,167,.03) 40px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 6rem 2rem 4rem;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .hero-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 1.5rem;
+  }
+
+  .hero-tag span {
+    display: inline-block;
+    width: 28px; height: 1px;
+    background: var(--accent);
+    vertical-align: middle;
+    margin-right: 10px;
+  }
+
+  .hero h1 {
+    font-family: var(--display);
+    font-size: clamp(2.8rem, 6vw, 5.5rem);
+    font-weight: 800;
+    line-height: 1.0;
+    letter-spacing: -.02em;
+    margin-bottom: 1rem;
+  }
+
+  .hero h1 em {
+    font-style: normal;
+    -webkit-text-stroke: 1.5px var(--accent);
+    color: transparent;
+  }
+
+  .hero-sub {
+    font-size: 1.05rem;
+    color: var(--muted);
+    max-width: 560px;
+    margin-bottom: 3rem;
+    line-height: 1.75;
+  }
+
+  /* ── STACK MAP ── */
+  .stack-map {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    max-width: 700px;
+  }
+
+  .stack-cell {
+    background: var(--surface);
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+    transition: background .15s;
+    text-decoration: none;
+  }
+
+  .stack-cell:hover { background: var(--dim); }
+
+  .stack-cell .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-bottom: .5rem;
+  }
+
+  .stack-cell .tool-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .06em;
+  }
+
+  .stack-cell .tool-role {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+
+  /* ── MAIN LAYOUT ── */
+  .page { max-width: 1100px; margin: 0 auto; padding: 0 2rem 6rem; position: relative; z-index: 1; }
+
+  /* ── SECTION HEADERS ── */
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    margin: 5rem 0 2.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-header .eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .2em;
+    color: var(--muted);
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
+  .section-header h2 {
+    font-family: var(--display);
+    font-size: clamp(1.6rem, 3vw, 2.4rem);
+    font-weight: 800;
+    letter-spacing: -.02em;
+  }
+
+  /* ── TOOL COLOR MARKERS ── */
+  .marker-kserve  { color: var(--kserve); }
+  .marker-triton  { color: var(--triton); }
+  .marker-vllm    { color: var(--vllm);   }
+  .marker-ollama  { color: var(--ollama); }
+
+  /* ── CONCEPT CARD ── */
+  .concept-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 3rem;
+  }
+
+  .concept-card {
+    background: var(--surface);
+    padding: 1.75rem;
+  }
+
+  .concept-card h3 {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    margin-bottom: .75rem;
+  }
+
+  .concept-card p {
+    font-size: 13.5px;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  /* ── TOOL SECTIONS ── */
+  .tool-section {
+    margin-bottom: 4rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .tool-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tool-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .badge-kserve  { background: rgba(0,201,167,.12);  color: var(--kserve); }
+  .badge-triton  { background: rgba(79,142,247,.12); color: var(--triton); }
+  .badge-vllm    { background: rgba(255,107,53,.12); color: var(--vllm);   }
+  .badge-ollama  { background: rgba(199,125,255,.12);color: var(--ollama); }
+
+  .tool-header h3 {
+    font-family: var(--display);
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: -.01em;
+  }
+
+  .tool-header .tool-desc {
+    font-size: 13px;
+    color: var(--muted);
+    margin-left: auto;
+    text-align: right;
+    max-width: 300px;
+  }
+
+  .tool-body { padding: 2rem; }
+
+  /* ── TWO-COL INSIDE TOOL ── */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin-bottom: 2rem;
+  }
+
+  @media (max-width: 720px) { .two-col { grid-template-columns: 1fr; } .stack-map { grid-template-columns: 1fr 1fr; } }
+
+  .two-col h4 {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: .85rem;
+  }
+
+  /* ── FEATURE LIST ── */
+  .feat-list { list-style: none; }
+
+  .feat-list li {
+    display: flex;
+    gap: .6rem;
+    font-size: 13.5px;
+    color: var(--text);
+    padding: .35rem 0;
+    border-bottom: 1px solid var(--border);
+    align-items: baseline;
+  }
+
+  .feat-list li:last-child { border-bottom: none; }
+
+  .feat-list li::before {
+    content: '→';
+    font-family: var(--mono);
+    font-size: 11px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  /* ── CODE BLOCK ── */
+  .code-block {
+    background: #070c12;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 1.5rem 0;
+    font-size: 12.5px;
+  }
+
+  .code-block-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .6rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .code-block-header .filename {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .code-block-header .lang-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .1em;
+    color: var(--label);
+    text-transform: uppercase;
+  }
+
+  .code-block pre {
+    padding: 1.25rem 1.25rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    line-height: 1.65;
+  }
+
+  .code-block code { color: var(--text); }
+
+  .kw  { color: #4f8ef7; }
+  .str { color: #00c9a7; }
+  .cm  { color: #3d5570; font-style: italic; }
+  .val { color: #ff6b35; }
+  .key { color: #c77dff; }
+
+  /* ── ARCH DIAGRAM ── */
+  .arch-diagram {
+    background: #070c12;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2rem;
+    margin: 1.5rem 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.9;
+    color: var(--muted);
+    overflow-x: auto;
+  }
+
+  .arch-diagram .node   { color: var(--text); font-weight: 600; }
+  .arch-diagram .arrow  { color: var(--accent); }
+  .arch-diagram .label  { color: var(--vllm); }
+
+  /* ── COMPARISON TABLE ── */
+  .compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin: 2rem 0;
+  }
+
+  .compare-table th {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: left;
+    padding: .75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .compare-table td {
+    padding: .75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--text);
+  }
+
+  .compare-table tr:hover td { background: rgba(255,255,255,.02); }
+
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 2px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    margin: 2px;
+  }
+
+  .tag-green  { background: rgba(0,201,167,.12);  color: var(--kserve); }
+  .tag-blue   { background: rgba(79,142,247,.12); color: var(--triton); }
+  .tag-orange { background: rgba(255,107,53,.12); color: var(--vllm);   }
+  .tag-purple { background: rgba(199,125,255,.12);color: var(--ollama); }
+
+  /* ── METRIC CHIPS ── */
+  .metric-row {
+    display: flex;
+    gap: 1px;
+    flex-wrap: wrap;
+    margin-bottom: 2rem;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .metric-chip {
+    background: var(--surface);
+    padding: 1rem 1.5rem;
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .metric-chip .m-val {
+    font-family: var(--display);
+    font-size: 1.8rem;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: .3rem;
+  }
+
+  .metric-chip .m-label {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+    letter-spacing: .06em;
+  }
+
+  /* ── CHECKLIST ── */
+  .checklist { list-style: none; margin: 1rem 0; }
+
+  .checklist li {
+    display: flex;
+    gap: .75rem;
+    font-size: 13.5px;
+    padding: .4rem 0;
+    align-items: baseline;
+  }
+
+  .checklist li .ck {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  /* ── FLOW DIAGRAM ── */
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 1.5rem 0;
+    flex-wrap: wrap;
+  }
+
+  .flow-node {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: .6rem 1.1rem;
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .flow-arrow {
+    font-family: var(--mono);
+    color: var(--accent);
+    padding: 0 .5rem;
+    font-size: 14px;
+  }
+
+  /* ── NAV DOTS ── */
+  .nav-bar {
+    position: fixed;
+    right: 2rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+    z-index: 100;
+  }
+
+  .nav-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--label);
+    cursor: pointer;
+    transition: all .2s;
+    text-decoration: none;
+    display: block;
+  }
+
+  .nav-dot:hover { background: var(--accent); transform: scale(1.5); }
+
+  @media (max-width: 900px) { .nav-bar { display: none; } }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 3rem 2rem;
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  footer .f-left {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: .08em;
+  }
+
+  footer .f-right {
+    display: flex;
+    gap: 1.5rem;
+  }
+
+  footer a {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--label);
+    text-decoration: none;
+    letter-spacing: .08em;
+  }
+
+  footer a:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- NAV DOTS -->
+<nav class="nav-bar">
+  <a class="nav-dot" href="#intro"    title="Giriş"></a>
+  <a class="nav-dot" href="#kserve"   title="KServe"></a>
+  <a class="nav-dot" href="#triton"   title="Triton"></a>
+  <a class="nav-dot" href="#vllm"     title="vLLM"></a>
+  <a class="nav-dot" href="#ollama"   title="Ollama"></a>
+  <a class="nav-dot" href="#compare"  title="Karşılaştırma"></a>
+</nav>
+
+<!-- HERO -->
+<section class="hero" id="intro">
+  <div class="hero-tag"><span></span>Kubernetes · ML Serving · LLM Inference</div>
+  <h1>LLM Serving<br>&amp; <em>Inference</em></h1>
+  <p class="hero-sub">
+    Büyük dil modellerini Kubernetes üzerinde production'a almak; KServe, Triton, vLLM ve Ollama araçlarıyla yüksek verimli servis mimarileri kurmak.
+  </p>
+  <div class="stack-map">
+    <a class="stack-cell" href="#kserve">
+      <div class="dot" style="background:var(--kserve)"></div>
+      <div class="tool-name" style="color:var(--kserve)">KServe</div>
+      <div class="tool-role">Model Deployment</div>
+    </a>
+    <a class="stack-cell" href="#triton">
+      <div class="dot" style="background:var(--triton)"></div>
+      <div class="tool-name" style="color:var(--triton)">Triton</div>
+      <div class="tool-role">Inference Server</div>
+    </a>
+    <a class="stack-cell" href="#vllm">
+      <div class="dot" style="background:var(--vllm)"></div>
+      <div class="tool-name" style="color:var(--vllm)">vLLM</div>
+      <div class="tool-role">LLM Engine</div>
+    </a>
+    <a class="stack-cell" href="#ollama">
+      <div class="dot" style="background:var(--ollama)"></div>
+      <div class="tool-name" style="color:var(--ollama)">Ollama</div>
+      <div class="tool-role">Local / Cluster</div>
+    </a>
+  </div>
+</section>
+
+<!-- PAGE BODY -->
+<main class="page">
+
+  <!-- TEMEL KAVRAMLAR -->
+  <div class="section-header">
+    <span class="eyebrow">Temel Kavramlar</span>
+    <h2>Serving Stack Nedir?</h2>
+  </div>
+
+  <div class="concept-grid">
+    <div class="concept-card">
+      <h3 class="marker-kserve">Model Serving</h3>
+      <p>Eğitilmiş bir modeli HTTP/gRPC endpoint olarak dışarıya açma sürecidir. İstemciler bu endpoint'e istek gönderir, model çıkarım (inference) yapar, sonucu döner.</p>
+    </div>
+    <div class="concept-card">
+      <h3 class="marker-triton">Inference Engine</h3>
+      <p>Modeli GPU/CPU'ya yükleyip çalıştıran çekirdek bileşen. Batching, quantization ve bellek yönetimi gibi optimizasyonları burada yapılır.</p>
+    </div>
+    <div class="concept-card">
+      <h3 class="marker-vllm">LLM-Specific Challenges</h3>
+      <p>LLM'ler uzun context, token-by-token üretim (autoregressive decoding) ve KV-cache yönetimi gibi kendine özgü zorluklar sunar. Klasik serving frameworkleri bu konularda yetersiz kalır.</p>
+    </div>
+    <div class="concept-card">
+      <h3 class="marker-ollama">Kubernetes Entegrasyonu</h3>
+      <p>K8s üzerinde model serving; GPU node scheduling, autoscaling, health check ve rolling update gibi platform özelliklerinden yararlanmayı sağlar.</p>
+    </div>
+  </div>
+
+  <div class="arch-diagram">
+    <span class="cm"># Genel Serving Mimarisi</span><br><br>
+    <span class="node">  Client (HTTP / gRPC)</span><br>
+    <span class="arrow">        │</span><br>
+    <span class="arrow">        ▼</span><br>
+    <span class="node">  Ingress / Load Balancer</span><br>
+    <span class="arrow">        │</span><br>
+    <span class="arrow">        ▼</span><br>
+    <span class="node">  Serving Layer</span>  <span class="label">← KServe / Triton / vLLM / Ollama</span><br>
+    <span class="arrow">        │</span><br>
+    <span class="arrow">        ▼</span><br>
+    <span class="node">  Model Store</span>  <span class="label">← S3 / GCS / PVC / OCI Registry</span><br>
+    <span class="arrow">        │</span><br>
+    <span class="arrow">        ▼</span><br>
+    <span class="node">  GPU Node</span>  <span class="label">← CUDA, cuDNN, Tensor Cores</span>
+  </div>
+
+  <!-- ─── KSERVE ─── -->
+  <div class="section-header" id="kserve">
+    <span class="eyebrow">01 · Platform</span>
+    <h2 class="marker-kserve">KServe</h2>
+  </div>
+
+  <div class="tool-section">
+    <div class="tool-header">
+      <span class="tool-badge badge-kserve">KServe</span>
+      <h3>Kubernetes-native Model Serving</h3>
+      <div class="tool-desc">Kubernetes CRD'leri ile model deploy et, autoscale et, canary release yap.</div>
+    </div>
+    <div class="tool-body">
+
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:1.5rem;">
+        KServe (eski adıyla KFServing), Kubernetes üzerinde model servis etmek için CNCF ekosisteminden gelen açık kaynak bir platformdur. <strong>InferenceService</strong> adı verilen custom resource ile model deployment, autoscaling ve traffic splitting tek bir YAML ile yönetilir.
+      </p>
+
+      <div class="two-col">
+        <div>
+          <h4>Temel Özellikler</h4>
+          <ul class="feat-list">
+            <li>InferenceService CRD ile declarative deployment</li>
+            <li>KNative üzerinden scale-to-zero desteği</li>
+            <li>Canary / Blue-green traffic splitting</li>
+            <li>Sklearn, XGBoost, PyTorch, TF, ONNX, HuggingFace desteği</li>
+            <li>Model explainability (Alibi) entegrasyonu</li>
+            <li>Pre/post processing transformer pod'ları</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Mimari Katmanlar</h4>
+          <ul class="feat-list">
+            <li><strong>Predictor</strong> — modeli çalıştıran asıl pod</li>
+            <li><strong>Transformer</strong> — istek/yanıt dönüşümü</li>
+            <li><strong>Explainer</strong> — tahmin açıklaması</li>
+            <li><strong>ModelMesh</strong> — yoğun model senaryoları için high-density serving</li>
+            <li>Istio ile mTLS ve traffic management</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="filename">llama-inference-service.yaml</span>
+          <span class="lang-tag">YAML</span>
+        </div>
+        <pre><code><span class="kw">apiVersion</span>: <span class="str">serving.kserve.io/v1beta1</span>
+<span class="kw">kind</span>: <span class="str">InferenceService</span>
+<span class="kw">metadata</span>:
+  <span class="key">name</span>: <span class="str">llama-3-8b</span>
+  <span class="key">namespace</span>: <span class="str">ml-serving</span>
+<span class="kw">spec</span>:
+  <span class="key">predictor</span>:
+    <span class="key">model</span>:
+      <span class="key">modelFormat</span>:
+        <span class="key">name</span>: <span class="str">huggingface</span>
+      <span class="key">storageUri</span>: <span class="str">s3://my-bucket/llama-3-8b</span>
+      <span class="key">resources</span>:
+        <span class="key">limits</span>:
+          <span class="key">nvidia.com/gpu</span>: <span class="val">"1"</span>
+          <span class="key">memory</span>: <span class="str">24Gi</span>
+        <span class="key">requests</span>:
+          <span class="key">nvidia.com/gpu</span>: <span class="val">"1"</span>
+          <span class="key">memory</span>: <span class="str">20Gi</span>
+  <span class="key">transformer</span>:
+    <span class="key">containers</span>:
+      - <span class="key">name</span>: <span class="str">custom-transformer</span>
+        <span class="key">image</span>: <span class="str">my-registry/chat-transformer:v1</span></code></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="filename">inference-request.py</span>
+          <span class="lang-tag">Python</span>
+        </div>
+        <pre><code><span class="kw">import</span> requests
+
+<span class="cm"># KServe endpoint'e istek gönder</span>
+url = <span class="str">"http://llama-3-8b.ml-serving.svc.cluster.local/v1/models/llama-3-8b:predict"</span>
+
+payload = {
+    <span class="str">"instances"</span>: [{
+        <span class="str">"prompt"</span>: <span class="str">"Kubernetes nedir?"</span>,
+        <span class="str">"max_new_tokens"</span>: <span class="val">256</span>,
+        <span class="str">"temperature"</span>: <span class="val">0.7</span>
+    }]
+}
+
+response = requests.post(url, json=payload)
+<span class="kw">print</span>(response.json()[<span class="str">"predictions"</span>][<span class="val">0</span>])</code></pre>
+      </div>
+
+      <h4 style="font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:.85rem;">Canary Deployment — Traffic Splitting</h4>
+      <div class="flow">
+        <div class="flow-node" style="border-color:var(--kserve)">Traffic 100%</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node">v1 Model</div>
+        <div class="flow-arrow" style="margin-left:1.5rem;">→ canary</div>
+        <div class="flow-node" style="border-color:var(--kserve)">Traffic 80/20</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node">v1 + v2</div>
+        <div class="flow-arrow">→ promote</div>
+        <div class="flow-node" style="border-color:var(--kserve)">Traffic 100%</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-node">v2 Model</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── TRITON ─── -->
+  <div class="section-header" id="triton">
+    <span class="eyebrow">02 · Inference Server</span>
+    <h2 class="marker-triton">Triton Inference Server</h2>
+  </div>
+
+  <div class="tool-section">
+    <div class="tool-header">
+      <span class="tool-badge badge-triton">Triton</span>
+      <h3>NVIDIA Triton Inference Server</h3>
+      <div class="tool-desc">Multi-framework, high-throughput, production-grade inference.</div>
+    </div>
+    <div class="tool-body">
+
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:1.5rem;">
+        NVIDIA'nın geliştirdiği Triton, TensorRT, PyTorch, ONNX, TensorFlow ve OpenVINO modellerini aynı anda servis edebilen yüksek performanslı bir inference sunucusudur. Dynamic batching ve concurrent model execution gibi özelliklerle GPU kullanımını maksimize eder.
+      </p>
+
+      <div class="metric-row">
+        <div class="metric-chip">
+          <div class="m-val" style="color:var(--triton)">Multi</div>
+          <div class="m-label">Framework Desteği</div>
+        </div>
+        <div class="metric-chip">
+          <div class="m-val" style="color:var(--triton)">gRPC</div>
+          <div class="m-label">Birincil Protokol</div>
+        </div>
+        <div class="metric-chip">
+          <div class="m-val" style="color:var(--triton)">TRT</div>
+          <div class="m-label">NVIDIA Optimizasyon</div>
+        </div>
+        <div class="metric-chip">
+          <div class="m-val" style="color:var(--triton)">BLS</div>
+          <div class="m-label">Business Logic Scripting</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div>
+          <h4>Desteklenen Backend'ler</h4>
+          <ul class="feat-list">
+            <li>TensorRT — NVIDIA GPU optimizasyonu</li>
+            <li>PyTorch (TorchScript) — dinamik graflar</li>
+            <li>ONNX Runtime — cross-platform</li>
+            <li>TensorFlow SavedModel / GraphDef</li>
+            <li>OpenVINO — Intel CPU/iGPU</li>
+            <li>Python Backend — custom inference kodu</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Performans Özellikleri</h4>
+          <ul class="feat-list">
+            <li>Dynamic Batching — istekleri otomatik grupla</li>
+            <li>Concurrent Model Execution — aynı anda N kopya</li>
+            <li>Model Ensemble — zincirleme pipeline</li>
+            <li>CUDA Shared Memory — sıfır kopya transfer</li>
+            <li>Rate Limiter — öncelikli inference sırası</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="filename">model_repository/llama/config.pbtxt</span>
+          <span class="lang-tag">Protobuf Config</span>
+        </div>
+        <pre><code><span class="key">name</span>: <span class="str">"llama-3-8b"</span>
+<span class="key">backend</span>: <span class="str">"python"</span>
+<span class="key">max_batch_size</span>: <span class="val">8</span>
+
+<span class="key">input</span> [
+  {
+    <span class="key">name</span>: <span class="str">"INPUT_IDS"</span>
+    <span class="key">data_type</span>: <span class="str">TYPE_INT64</span>
+    <span class="key">dims</span>: [ <span class="val">-1</span>, <span class="val">-1</span> ]    <span class="cm"># [batch, seq_len]</span>
+  }
+]
+
+<span class="key">output</span> [
+  {
+    <span class="key">name</span>: <span class="str">"OUTPUT_IDS"</span>
+    <span class="key">data_type</span>: <span class="str">TYPE_INT64</span>
+    <span class="key">dims</span>: [ <span class="val">-1</span>, <span class="val">-1</span> ]
+  }
+]
+
+<span class="key">dynamic_batching</span> {
+  <span class="key">preferred_batch_size</span>: [ <span class="val">1</span>, <span class="val">4</span>, <span class="val">8</span> ]
+  <span class="key">max_queue_delay_microseconds</span>: <span class="val">100</span>
+}
+
+<span class="key">instance_group</span> [
+  {
+    <span class="key">kind</span>: <span class="str">KIND_GPU</span>
+    <span class="key">count</span>: <span class="val">2</span>
+    <span class="key">gpus</span>: [ <span class="val">0</span>, <span class="val">1</span> ]
+  }
+]</code></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="filename">triton-deployment.yaml</span>
+          <span class="lang-tag">Kubernetes</span>
+        </div>
+        <pre><code><span class="kw">apiVersion</span>: <span class="str">apps/v1</span>
+<span class="kw">kind</span>: <span class="str">Deployment</span>
+<span class="kw">metadata</span>:
+  <span class="key">name</span>: <span class="str">triton-server</span>
+<span class="kw">spec</span>:
+  <span class="key">replicas</span>: <span class="val">2</span>
+  <span class="key">template</span>:
+    <span class="key">spec</span>:
+      <span class="key">containers</span>:
+      - <span class="key">name</span>: <span class="str">triton</span>
+        <span class="key">image</span>: <span class="str">nvcr.io/nvidia/tritonserver:24.01-py3</span>
+        <span class="key">args</span>:
+          - <span class="str">"tritonserver"</span>
+          - <span class="str">"--model-repository=s3://my-bucket/models"</span>
+          - <span class="str">"--allow-grpc=true"</span>
+          - <span class="str">"--allow-metrics=true"</span>
+        <span class="key">ports</span>:
+          - <span class="key">containerPort</span>: <span class="val">8000</span>   <span class="cm"># HTTP</span>
+          - <span class="key">containerPort</span>: <span class="val">8001</span>   <span class="cm"># gRPC</span>
+          - <span class="key">containerPort</span>: <span class="val">8002</span>   <span class="cm"># Metrics</span>
+        <span class="key">resources</span>:
+          <span class="key">limits</span>:
+            <span class="key">nvidia.com/gpu</span>: <span class="val">"2"</span></code></pre>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── vLLM ─── -->
+  <div class="section-header" id="vllm">
+    <span class="eyebrow">03 · LLM Engine</span>
+    <h2 class="marker-vllm">vLLM</h2>
+  </div>
+
+  <div class="tool-section">
+    <div class="tool-header">
+      <span class="tool-badge badge-vllm">vLLM</span>
+      <h3>High-Throughput LLM Serving</h3>
+      <div class="tool-desc">PagedAttention ile KV-cache yönetimi; OpenAI API uyumlu endpoint.</div>
+    </div>
+    <div class="tool-body">
+
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:1.5rem;">
+        vLLM, UC Berkeley tarafından geliştirilen ve LLM servisi için özelleşmiş bir inference engine'dir. Temel yeniliği olan <strong>PagedAttention</strong>, GPU belleğini sanal bellek mantığıyla yönetir; bu sayede KV-cache parçalanmasını azaltır ve throughput'u dramatik biçimde artırır.
+      </p>
+
+      <div class="metric-row">
+        <div class="metric-chip">
+          <div class="m-val" style="color:var(--vllm)">24×</div>
+          <div class="m-label">HuggingFace'e göre throughput</div>
+        </div>
+        <div class="metric-chip">
+          <div class="m-val" style="color:var(--vllm)">~0%</div>
+          <div class="m-label">KV-cache waste</div>
+        </div>
+        <div class="metric-chip">
+          <div class="m-val" style="color:var(--vllm)">OAI</div>
+          <div class="m-label">API Uyumluluğu</div>
+        </div>
+        <div class="metric-chip">
+          <div class="m-val" style="color:var(--vllm)">TP</div>
+          <div class="m-label">Tensor Parallelism</div>
+        </div>
+      </div>
+
+      <h4 style="font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:.85rem;margin-top:1rem;">PagedAttention Mantığı</h4>
+      <div class="arch-diagram">
+        <span class="cm"># Klasik Serving — KV-cache parçalanması</span><br>
+        <span class="node">  Request A:</span>  <span class="label">████████████░░░░</span>  <span class="cm">← 25% wasted</span><br>
+        <span class="node">  Request B:</span>  <span class="label">██████░░░░░░░░░░</span>  <span class="cm">← 62% wasted</span><br><br>
+        <span class="cm"># vLLM PagedAttention — sanal blok yönetimi</span><br>
+        <span class="node">  Physical Memory:</span>  <span class="label">████ ████ ████ ████</span><br>
+        <span class="arrow">                      ↑    ↑    ↑    ↑</span><br>
+        <span class="node">  Block Table:</span>  <span class="label">A[0] B[0] A[1] B[1]</span>  <span class="cm">← interleaved, no waste</span>
+      </div>
+
+      <div class="two-col">
+        <div>
+          <h4>Temel Özellikler</h4>
+          <ul class="feat-list">
+            <li>PagedAttention — blok tabanlı KV-cache</li>
+            <li>Continuous Batching — istekleri sürekli birleştir</li>
+            <li>Tensor Parallelism — çoklu GPU dağıtımı</li>
+            <li>Speculative Decoding — taslak model ile hızlanma</li>
+            <li>AWQ / GPTQ / SqueezeLLM quantization</li>
+            <li>LoRA / QLoRA adapter yükleme (hot-swap)</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Desteklenen Modeller</h4>
+          <ul class="feat-list">
+            <li>Llama 3 / Llama 2 ailesi</li>
+            <li>Mistral / Mixtral MoE</li>
+            <li>Qwen 2.5, DeepSeek, Gemma</li>
+            <li>Falcon, MPT, StarCoder</li>
+            <li>Phi-3, Command-R+</li>
+            <li>Tüm HuggingFace AutoModelForCausalLM modelleri</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="filename">vllm-deployment.yaml</span>
+          <span class="lang-tag">Kubernetes</span>
+        </div>
+        <pre><code><span class="kw">apiVersion</span>: <span class="str">apps/v1</span>
+<span class="kw">kind</span>: <span class="str">Deployment</span>
+<span class="kw">metadata</span>:
+  <span class="key">name</span>: <span class="str">vllm-llama3</span>
+<span class="kw">spec</span>:
+  <span class="key">replicas</span>: <span class="val">1</span>
+  <span class="key">template</span>:
+    <span class="key">spec</span>:
+      <span class="key">containers</span>:
+      - <span class="key">name</span>: <span class="str">vllm</span>
+        <span class="key">image</span>: <span class="str">vllm/vllm-openai:latest</span>
+        <span class="key">command</span>: [<span class="str">"python"</span>, <span class="str">"-m"</span>, <span class="str">"vllm.entrypoints.openai.api_server"</span>]
+        <span class="key">args</span>:
+          - <span class="str">"--model"</span>
+          - <span class="str">"meta-llama/Meta-Llama-3-8B-Instruct"</span>
+          - <span class="str">"--tensor-parallel-size"</span>
+          - <span class="val">"2"</span>
+          - <span class="str">"--max-model-len"</span>
+          - <span class="val">"8192"</span>
+          - <span class="str">"--gpu-memory-utilization"</span>
+          - <span class="val">"0.90"</span>
+          - <span class="str">"--enable-lora"</span>
+        <span class="key">env</span>:
+          - <span class="key">name</span>: <span class="str">HUGGING_FACE_HUB_TOKEN</span>
+            <span class="key">valueFrom</span>:
+              <span class="key">secretKeyRef</span>:
+                <span class="key">name</span>: <span class="str">hf-secret</span>
+                <span class="key">key</span>:  <span class="str">token</span>
+        <span class="key">resources</span>:
+          <span class="key">limits</span>:
+            <span class="key">nvidia.com/gpu</span>: <span class="val">"2"</span>
+            <span class="key">memory</span>: <span class="str">48Gi</span>
+        <span class="key">ports</span>:
+          - <span class="key">containerPort</span>: <span class="val">8000</span></code></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="filename">vllm-client.py</span>
+          <span class="lang-tag">Python — OpenAI SDK ile</span>
+        </div>
+        <pre><code><span class="kw">from</span> openai <span class="kw">import</span> OpenAI
+
+<span class="cm"># vLLM, OpenAI API'si ile birebir uyumludur</span>
+client = OpenAI(
+    api_key=<span class="str">"not-needed"</span>,
+    base_url=<span class="str">"http://vllm-service:8000/v1"</span>
+)
+
+<span class="cm"># Streaming ile yanıt al</span>
+stream = client.chat.completions.create(
+    model=<span class="str">"meta-llama/Meta-Llama-3-8B-Instruct"</span>,
+    messages=[
+        {<span class="str">"role"</span>: <span class="str">"user"</span>, <span class="str">"content"</span>: <span class="str">"Kubernetes pod nedir?"</span>}
+    ],
+    max_tokens=<span class="val">512</span>,
+    temperature=<span class="val">0.7</span>,
+    stream=<span class="val">True</span>
+)
+
+<span class="kw">for</span> chunk <span class="kw">in</span> stream:
+    <span class="kw">if</span> chunk.choices[<span class="val">0</span>].delta.content:
+        <span class="kw">print</span>(chunk.choices[<span class="val">0</span>].delta.content, end=<span class="str">""</span>, flush=<span class="val">True</span>)</code></pre>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── OLLAMA ─── -->
+  <div class="section-header" id="ollama">
+    <span class="eyebrow">04 · Local & Cluster</span>
+    <h2 class="marker-ollama">Ollama</h2>
+  </div>
+
+  <div class="tool-section">
+    <div class="tool-header">
+      <span class="tool-badge badge-ollama">Ollama</span>
+      <h3>Local Model Runtime</h3>
+      <div class="tool-desc">Laptop'tan cluster'a — tek komutla model çalıştır.</div>
+    </div>
+    <div class="tool-body">
+
+      <p style="color:var(--muted);font-size:13.5px;margin-bottom:1.5rem;">
+        Ollama, LLM'leri yerel ortamlarda ve küçük cluster'larda kolayca çalıştırmak için tasarlanmış hafif bir runtime'dır. llama.cpp tabanlı olup CPU'da da çalışabilir; geliştirme ortamı veya edge deployment için idealdir.
+      </p>
+
+      <div class="two-col">
+        <div>
+          <h4>Güçlü Yönleri</h4>
+          <ul class="feat-list">
+            <li>Sıfır konfigürasyon ile model indirme ve çalıştırma</li>
+            <li>CPU + GPU hybrid çalışma (Metal, CUDA, ROCm)</li>
+            <li>Modelfile ile özel model tanımları</li>
+            <li>OpenAI uyumlu REST API</li>
+            <li>Çok küçük memory footprint</li>
+            <li>Kubernetes'te DaemonSet olarak node başına deploy</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Sınırlamaları</h4>
+          <ul class="feat-list">
+            <li>Tensor parallelism desteği kısıtlı</li>
+            <li>Yüksek concurrent istek kapasitesi düşük</li>
+            <li>vLLM kadar throughput optimizasyonu yok</li>
+            <li>Production yük için tek başına yetmez</li>
+            <li>Model registry yönetimi basit kalır</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="filename">Modelfile</span>
+          <span class="lang-tag">Ollama Modelfile</span>
+        </div>
+        <pre><code><span class="cm"># Özel sistem promptuyla model tanımla</span>
+<span class="kw">FROM</span> <span class="str">llama3.1:8b</span>
+
+<span class="kw">PARAMETER</span> <span class="key">temperature</span> <span class="val">0.7</span>
+<span class="kw">PARAMETER</span> <span class="key">top_p</span> <span class="val">0.9</span>
+<span class="kw">PARAMETER</span> <span class="key">num_ctx</span> <span class="val">4096</span>
+
+<span class="kw">SYSTEM</span> <span class="str">"""
+Sen bir Kubernetes uzmanısın. Teknik sorulara açık,
+örnekli ve doğru yanıtlar verirsin.
+"""</span>
+
+<span class="cm"># Build: ollama create k8s-expert -f Modelfile</span>
+<span class="cm"># Run:   ollama run k8s-expert</span></code></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="filename">ollama-daemonset.yaml</span>
+          <span class="lang-tag">Kubernetes — DaemonSet</span>
+        </div>
+        <pre><code><span class="kw">apiVersion</span>: <span class="str">apps/v1</span>
+<span class="kw">kind</span>: <span class="str">DaemonSet</span>
+<span class="kw">metadata</span>:
+  <span class="key">name</span>: <span class="str">ollama</span>
+  <span class="key">namespace</span>: <span class="str">ai-tools</span>
+<span class="kw">spec</span>:
+  <span class="key">selector</span>:
+    <span class="key">matchLabels</span>:
+      <span class="key">app</span>: <span class="str">ollama</span>
+  <span class="key">template</span>:
+    <span class="key">spec</span>:
+      <span class="key">nodeSelector</span>:
+        <span class="key">accelerator</span>: <span class="str">nvidia-gpu</span>   <span class="cm"># sadece GPU node'larına</span>
+      <span class="key">containers</span>:
+      - <span class="key">name</span>: <span class="str">ollama</span>
+        <span class="key">image</span>: <span class="str">ollama/ollama:latest</span>
+        <span class="key">ports</span>:
+          - <span class="key">containerPort</span>: <span class="val">11434</span>
+        <span class="key">volumeMounts</span>:
+          - <span class="key">name</span>: <span class="str">ollama-data</span>
+            <span class="key">mountPath</span>: <span class="str">/root/.ollama</span>
+        <span class="key">resources</span>:
+          <span class="key">limits</span>:
+            <span class="key">nvidia.com/gpu</span>: <span class="val">"1"</span>
+      <span class="key">volumes</span>:
+      - <span class="key">name</span>: <span class="str">ollama-data</span>
+        <span class="key">hostPath</span>:
+          <span class="key">path</span>: <span class="str">/var/lib/ollama</span></code></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-block-header">
+          <span class="filename">pull-and-run.sh</span>
+          <span class="lang-tag">Shell</span>
+        </div>
+        <pre><code><span class="cm"># Model indir</span>
+ollama pull llama3.1:8b
+ollama pull mistral:7b
+ollama pull qwen2.5:14b
+
+<span class="cm"># Çalıştır</span>
+ollama run llama3.1:8b <span class="str">"Merhaba, nasıl yardımcı olabilirim?"</span>
+
+<span class="cm"># REST API ile</span>
+curl http://localhost:11434/api/chat -d <span class="str">'{
+  "model": "llama3.1:8b",
+  "messages": [{"role":"user","content":"Kubernetes pod nedir?"}],
+  "stream": false
+}'</span></code></pre>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─── KARŞILAŞTIRMA ─── -->
+  <div class="section-header" id="compare">
+    <span class="eyebrow">Özet</span>
+    <h2>Araç Seçim Rehberi</h2>
+  </div>
+
+  <table class="compare-table">
+    <thead>
+      <tr>
+        <th>Araç</th>
+        <th>En İyi Olduğu Yer</th>
+        <th>Güçlü Yönler</th>
+        <th>Ne Zaman Seçme</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong class="marker-kserve">KServe</strong></td>
+        <td>Multi-model production platform</td>
+        <td>
+          <span class="tag tag-green">K8s-native</span>
+          <span class="tag tag-green">Autoscale</span>
+          <span class="tag tag-green">Canary</span>
+        </td>
+        <td>Farklı framework'lerden onlarca modeli tek platformda yönetmek istediğinde</td>
+      </tr>
+      <tr>
+        <td><strong class="marker-triton">Triton</strong></td>
+        <td>Multi-framework, high-GPU utilization</td>
+        <td>
+          <span class="tag tag-blue">TensorRT</span>
+          <span class="tag tag-blue">Ensemble</span>
+          <span class="tag tag-blue">gRPC</span>
+        </td>
+        <td>ONNX/TensorRT modelleri çalıştırman ya da GPU'yu maksimum kullanman gerektiğinde</td>
+      </tr>
+      <tr>
+        <td><strong class="marker-vllm">vLLM</strong></td>
+        <td>Yüksek concurrency LLM serving</td>
+        <td>
+          <span class="tag tag-orange">PagedAttention</span>
+          <span class="tag tag-orange">Throughput</span>
+          <span class="tag tag-orange">OpenAI API</span>
+        </td>
+        <td>LLM'e çok sayıda eş zamanlı kullanıcı gelecekse ve throughput kritikse</td>
+      </tr>
+      <tr>
+        <td><strong class="marker-ollama">Ollama</strong></td>
+        <td>Geliştirme, edge, iç araçlar</td>
+        <td>
+          <span class="tag tag-purple">Kolay kurulum</span>
+          <span class="tag tag-purple">CPU+GPU</span>
+          <span class="tag tag-purple">Modelfile</span>
+        </td>
+        <td>Hızlı prototipleme ya da CPU-only node'larda hafif serving yeterliyse</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- SON ADIMLAR -->
+  <div class="section-header">
+    <span class="eyebrow">Sonraki Adımlar</span>
+    <h2>Başlarken Checklist</h2>
+  </div>
+
+  <div class="concept-grid">
+    <div class="concept-card">
+      <h3 class="marker-kserve">KServe Başlangıç</h3>
+      <ul class="checklist">
+        <li><span class="ck">[✓]</span> Istio + KNative kurulumu</li>
+        <li><span class="ck">[✓]</span> kserve/kserve Helm chart deploy</li>
+        <li><span class="ck">[✓]</span> S3'e model yükle, InferenceService yaz</li>
+        <li><span class="ck">[✓]</span> kubectl get inferenceservice ile durum kontrol</li>
+      </ul>
+    </div>
+    <div class="concept-card">
+      <h3 class="marker-vllm">vLLM Başlangıç</h3>
+      <ul class="checklist">
+        <li><span class="ck">[✓]</span> pip install vllm → lokal test</li>
+        <li><span class="ck">[✓]</span> vllm/vllm-openai Docker image hazırla</li>
+        <li><span class="ck">[✓]</span> GPU node affinity + tolerations yaz</li>
+        <li><span class="ck">[✓]</span> HPA ile concurrent istek bazlı ölçekle</li>
+      </ul>
+    </div>
+    <div class="concept-card">
+      <h3 class="marker-ollama">Ollama Başlangıç</h3>
+      <ul class="checklist">
+        <li><span class="ck">[✓]</span> curl -fsSL https://ollama.com/install.sh | sh</li>
+        <li><span class="ck">[✓]</span> ollama pull llama3.1:8b</li>
+        <li><span class="ck">[✓]</span> Modelfile ile özel sistem promptu ekle</li>
+        <li><span class="ck">[✓]</span> K8s'te DaemonSet olarak GPU node'larına dağıt</li>
+      </ul>
+    </div>
+    <div class="concept-card">
+      <h3 style="color:var(--text);">Monitoring</h3>
+      <ul class="checklist">
+        <li><span class="ck">[✓]</span> Prometheus + Grafana stack kurulumu</li>
+        <li><span class="ck">[✓]</span> vLLM /metrics endpoint'ini scrape et</li>
+        <li><span class="ck">[✓]</span> Triton :8002/metrics ile GPU metrikleri</li>
+        <li><span class="ck">[✓]</span> TTFT, throughput, latency dashboard</li>
+      </ul>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <div class="f-left">LLM SERVING &amp; INFERENCE — Kubernetes Guide</div>
+  <div class="f-right">
+    <a href="#intro">↑ Başa Dön</a>
+    <a href="https://kserve.github.io/website/" target="_blank">KServe Docs</a>
+    <a href="https://docs.vllm.ai" target="_blank">vLLM Docs</a>
+    <a href="https://ollama.com/docs" target="_blank">Ollama Docs</a>
+  </div>
+</footer>
+
+</body>
+</html>
