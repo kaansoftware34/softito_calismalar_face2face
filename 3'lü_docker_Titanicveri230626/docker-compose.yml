@@ -1,0 +1,28 @@
+services:
+
+  # 1. Titanic ML: Hayatta Kalma Tahmini (Random Forest)
+  titanic-survival-predict:
+    build: .
+    container_name: titanic-survival-predict
+    command: sh -c "python titanic_survival_predict.py && tail -f /dev/null"
+    volumes:
+      - ./output:/app/output
+    restart: "no"
+
+  # 2. Titanic ML: Bilet Fiyatı Tahmini (Linear Regression)
+  titanic-fare-predict:
+    build: .
+    container_name: titanic-fare-predict
+    command: sh -c "python titanic_fare_predict.py && tail -f /dev/null"
+    volumes:
+      - ./output:/app/output
+    restart: "no"
+
+  # 3. Titanic ML: Yolcu Kümeleme Analizi (K-Means)
+  titanic-clustering:
+    build: .
+    container_name: titanic-clustering
+    command: sh -c "python titanic_clustering.py && tail -f /dev/null"
+    volumes:
+      - ./output:/app/output
+    restart: "no"
